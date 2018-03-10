@@ -38,13 +38,41 @@ func TestRegexReverse(t *testing.T) {
 			Reg:  regexp.MustCompile(`{356{3}{{{{4}}{5}`),
 		},
 		{
-			Name: "Okay, let's get group-y",
-			Reg:  regexp.MustCompile("[A-D|3-8]b"),
+			Name: "Dead simple set",
+			Reg:  regexp.MustCompile(`[123ABC]`),
 		},
-		//		{
-		//			Name: "Make me an ip address!",
-		//			Reg:  regexp.MustCompile(`\d{1,3}\.\d{1,3}\.\d{1,3}`),
-		//		},
+		{
+			Name: "Dead simple set's evil twim",
+			Reg:  regexp.MustCompile(`[^123ABC]`),
+		},
+		{
+			Name: "Get that set range-y",
+			Reg:  regexp.MustCompile(`[A-D][EFG]b`),
+		},
+		{
+			Name: "will recursive group solving just work?",
+			Reg:  regexp.MustCompile(`(a+b+)?(abc{2,5}){2,4}`),
+		},
+		{
+			Name: "Escaping pain",
+			Reg:  regexp.MustCompile(`[*\-\\]`),
+		},
+		{
+			Name: "Escaping pain 2",
+			Reg:  regexp.MustCompile(`[*-\\]`),
+		},
+		{
+			Name: "Groups and modifiers, together at last",
+			Reg:  regexp.MustCompile("[ABC]?[DEF]{4,5}[GHI]+"),
+		},
+		{
+			Name: "The world is your oyster, special characters start",
+			Reg:  regexp.MustCompile(`a.+b`),
+		},
+		{
+			Name: "Make me an ip address! Special characters with a purpose",
+			Reg:  regexp.MustCompile(`\d{1,3}\.\d{1,3}\.\d{1,3}`),
+		},
 	}
 
 	for _, tc := range cases {
@@ -64,3 +92,5 @@ func TestRegexReverse(t *testing.T) {
 }
 
 // TODO: FUZZ TESTERRRRRRR
+// This seems like the kind of project that would really benefit from this. Generate many many valid regexps
+// Throw them in, see if they produce a matching string.

@@ -10,8 +10,15 @@ import (
 	"github.com/pkg/errors"
 )
 
+// TODO High Level
+//   1. Do I need to think about ^ or $? Maybe they just sort of don't matter
+//      in this project?
+//   2. Forgot how | or conditionals work, need to figure out how to handle them
+
 type RegexReverser struct {
-	maxRepeats int
+	maxRepeats       int
+	allCharactersSet []byte
+	whitespaceSet    []byte
 }
 
 type component interface {
@@ -53,7 +60,9 @@ type group struct {
 
 func NewRegexReverser(options ...func(*RegexReverser) error) (*RegexReverser, error) {
 	r := &RegexReverser{
-		maxRepeats: 64,
+		maxRepeats:       64,
+		allCharactersSet: AllCharacters(),
+		whitespaceSet:    Whitespace(),
 	}
 
 	for _, option := range options {
@@ -72,6 +81,24 @@ func MaxRepeats(mr int) func(*RegexReverser) error {
 			return errors.New("MaxRepeats must be configured with at least one repeat")
 		}
 		rr.maxRepeats = mr
+		return nil
+	}
+}
+
+func AllCharacterSet(cs []byte) func(*RegexReverser) error {
+	return func(rr *RegexReverser) error {
+		if len(cs) < 1 {
+			return errors.New("empty character set provided to AllCharacterSet is not allowed")
+		}
+		rr.allCharactersSet = cs
+		return nil
+	}
+}
+
+// If you're like me, you probably never want carriage returns or vertical tabs in your whitespace.
+func SaneWhitespace(cs []byte) func(*RegexReverser) error {
+	return func(rr *RegexReverser) error {
+		rr.whitespaceSet = []byte{' ', '\t', '\n'}
 		return nil
 	}
 }
@@ -170,15 +197,53 @@ func (c *compound) split() []component {
 			i += skip
 			r.modifier = modifier
 			splits = append(splits, r)
+			continue
 		}
 
 		// finally, check for the start of a group
 		if char == '(' {
-			// Note, remove non-caputuring group or named capture group syntax first
+			// TODO remove non-caputuring group or named capture group syntax first
+			escaped := false
+			skip := 0
+			for j := i + 1; j < len(c.compound); j++ {
+				if escaped {
+					escaped = false
+					continue
+				}
+
+				charJ := c.compound[j]
+				if charJ == '\\' {
+					escaped = true
+					continue
+				}
+
+				if charJ == ')' {
+					skip = (j - i)
+					break
+				}
+			}
+			g := &group{
+				compound: &compound{
+					rr:       c.rr,
+					compound: c.compound[i+1 : i+skip],
+				},
+			}
+			i += skip
+			modifier, skip := extractModifier(c.compound, i+1)
+			i += skip
+			g.modifier = modifier
+			splits = append(splits, g)
+			continue
 		}
 
-		// if it's none of those things, fallthrough. This probably shouldn't happen though.
-
+		// if it's none of those things, it ought to be a special
+		modifier, skip := extractModifier(c.compound, i+1)
+		i += skip
+		splits = append(splits, &special{
+			rr:       c.rr,
+			special:  string(char),
+			modifier: modifier,
+		})
 	}
 	return splits
 }
@@ -253,22 +318,44 @@ func (l *literal) solve() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.Repeat(l.literal, repeats), nil
+
+	// if this is an escaped special char, cut off the escape character
+	char := l.literal
+	if char[0] == '\\' {
+		char = string(l.literal[1])
+	}
+	return strings.Repeat(char, repeats), nil
 }
 
 // To solve a special, determine which special it is, then apply its special logic.
 func (s *special) solve() (string, error) {
-	return "", nil
+	repeats, err := s.rr.repeats(s.modifier)
+	if err != nil {
+		return "", err
+	}
+
+	resPieces := []string{}
+	for i := 0; i < repeats; i++ {
+		resPiece := ""
+		switch s.special {
+		case ".":
+			resPiece = string(s.rr.allCharactersSet[rand.Intn(len(s.rr.allCharactersSet))])
+		case "\\d":
+			resPiece = string(Digits()[rand.Intn(len(Digits()))])
+		default:
+			return "", errors.Errorf("cannot yet handle special character %s", s.special)
+		}
+
+		resPieces = append(resPieces, resPiece)
+	}
+	return strings.Join(resPieces, ""), nil
 }
 
 // To solve a range, determine:
-//   1. Are the | OR components?
-//      - split them up
-//      - pick one at random
-//   2. Is it a range?
+//   1. Is it a range?
 //      - ranges, use ASCII modulated characters.
 //      - pick one at random
-//   3. If not, simple split into component literals
+//   2. If not, simple split into component literals
 //      - pick one at random
 func (r *regRange) solve() (string, error) {
 	repeats, err := r.rr.repeats(r.modifier)
@@ -276,34 +363,61 @@ func (r *regRange) solve() (string, error) {
 		return "", err
 	}
 
-	components := []string{}
-	lowIndex := 0
-	escaped := false
-	for i := 0; i < len(r.regRange); i++ {
-		if escaped {
-			escaped = false
-			continue
-		}
-
-		char := r.regRange[i]
-		if char == '\\' {
-			escaped = true
-			continue
-		}
-		if char == '|' {
-			components = append(components, r.regRange[lowIndex:i])
-			lowIndex = i + 1
-		}
-	}
-	components = append(components, r.regRange[lowIndex:len(r.regRange)])
-
-	fmt.Printf("%+v\n", components)
-
 	resPieces := []string{}
 	for i := 0; i < repeats; i++ {
-		use := components[rand.Intn(len(components))]
-		fmt.Println(use)
+		negated := false
+		if r.regRange[0] == '^' {
+			negated = true
+		}
+		currentSet := []byte{}
+		// first extract and solve ranges
+		escaped := false
+		for j := 0; j < len(r.regRange); j++ {
+			if escaped {
+				if escaped {
+					escaped = false
+					continue
+				}
 
+				charJ := r.regRange[j]
+				if charJ == '\\' {
+					escaped = true
+					continue
+				}
+
+				if charJ == '-' {
+					// add every character in the set
+					// slice the solvable string to remove the set from it
+				}
+			}
+		}
+
+		// then, extract literals
+		for j := 0; j < len(r.regRange); j++ {
+			char := r.regRange[j]
+			currentSet = append(currentSet, char)
+		}
+
+		selectedSet := currentSet
+		if negated {
+			// chose from anything in the "all" set not in the current set
+			selectedSet = []byte{}
+			for j := 0; j < len(r.rr.allCharactersSet); j++ {
+				search := r.rr.allCharactersSet[j]
+				found := false
+				for k := 0; k < len(currentSet); k++ {
+					if currentSet[k] == search {
+						found = true
+						break
+					}
+				}
+				if !found {
+					selectedSet = append(selectedSet, search)
+				}
+			}
+		}
+
+		resPieces = append(resPieces, string(selectedSet[rand.Intn(len(selectedSet))]))
 	}
 	return strings.Join(resPieces, ""), nil
 }

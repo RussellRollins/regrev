@@ -19,9 +19,11 @@ func main() {
 }
 
 func run() error {
-	// Too many repeats will be ugly in the web UI
+	// Too many repeats will be ugly in the web UI.
+	// No one on the world wants to see vertical tabs.
 	reverse, err := regrev.NewRegexReverser(
 		regrev.MaxRepeats(5),
+		regrev.SaneWhitespace(),
 	)
 	if err != nil {
 		return err
