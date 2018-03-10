@@ -66,6 +66,16 @@ func NewRegexReverser(options ...func(*RegexReverser) error) (*RegexReverser, er
 	return r, nil
 }
 
+func MaxRepeats(mr int) func(*RegexReverser) error {
+	return func(rr *RegexReverser) error {
+		if mr <= 0 {
+			return errors.New("MaxRepeats must be configured with at least one repeat")
+		}
+		rr.maxRepeats = mr
+		return nil
+	}
+}
+
 func (rr *RegexReverser) Reverse(reg *regexp.Regexp) (string, error) {
 	// Create a group that is the whole regex, with no modifier
 	comp := &compound{
