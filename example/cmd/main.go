@@ -123,5 +123,6 @@ func run() error {
 			})
 		}
 	})
+
 	return http.ListenAndServe(port, nil)
 }
